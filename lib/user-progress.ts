@@ -1,5 +1,5 @@
 import { getQuizResults, type QuizResult } from "./quiz-data"
-import { getLoginDays } from "./login-tracker"
+import { getLoginDays, type LoginDay } from "./login-tracker"
 
 export interface UserProgress {
   totalQuizzesTaken: number
@@ -10,8 +10,12 @@ export interface UserProgress {
   recentQuizzes: QuizResult[]
 }
 
-export function getUserProgress(userId: string): UserProgress {
-  const quizResults = getQuizResults(userId)
+export async function getUserProgress(userId: string): Promise<UserProgress> {
+  // Fetch both datasets in parallel
+  const [quizResults, loginDays] = await Promise.all([
+    getQuizResults(userId),
+    getLoginDays(userId)
+  ])
 
   // Calculate average score
   const averageScore =
@@ -32,7 +36,7 @@ export function getUserProgress(userId: string): UserProgress {
     })
   })
 
-  const currentStreak = calculateLoginStreak(userId)
+  const currentStreak = calculateLoginStreak(loginDays)
 
   return {
     totalQuizzesTaken: quizResults.length,
@@ -40,13 +44,11 @@ export function getUserProgress(userId: string): UserProgress {
     bestScore: Math.round(bestScore),
     totalWordsLearned: correctWordIds.size,
     currentStreak,
-    recentQuizzes: quizResults.slice(-5).reverse(),
+    recentQuizzes: quizResults.slice(0, 5), // First 5 are newest
   }
 }
 
-function calculateLoginStreak(userId: string): number {
-  const loginDays = getLoginDays(userId)
-
+function calculateLoginStreak(loginDays: LoginDay[]): number {
   if (loginDays.length === 0) return 0
 
   // Sort login days in descending order (most recent first)
@@ -56,36 +58,39 @@ function calculateLoginStreak(userId: string): number {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  for (let i = 0; i < sortedDays.length; i++) {
-    const loginDate = new Date(sortedDays[i].date)
-    loginDate.setHours(0, 0, 0, 0)
+  // Check if the most recent login was today or yesterday to keep streak alive
+  if (sortedDays.length > 0) {
+    const lastLogin = new Date(sortedDays[0].date)
+    lastLogin.setHours(0, 0, 0, 0)
+    
+    const diffTime = Math.abs(today.getTime() - lastLogin.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays > 1) return 0 // Streak broken
+  }
 
-    const expectedDate = new Date(today)
-    expectedDate.setDate(expectedDate.getDate() - i)
+  // Calculate streak count
+  // Note: This logic simplifies to finding consecutive days backward
+  let currentDateToCheck = new Date(sortedDays[0].date)
+  currentDateToCheck.setHours(0,0,0,0)
+  
+  streak = 1 // We know we have at least one if we passed the check above
 
-    if (loginDate.getTime() === expectedDate.getTime()) {
+  for (let i = 1; i < sortedDays.length; i++) {
+    const prevDate = new Date(sortedDays[i].date)
+    prevDate.setHours(0, 0, 0, 0)
+
+    // Check if prevDate is exactly 1 day before currentDateToCheck
+    const expectedDate = new Date(currentDateToCheck)
+    expectedDate.setDate(expectedDate.getDate() - 1)
+
+    if (prevDate.getTime() === expectedDate.getTime()) {
       streak++
+      currentDateToCheck = prevDate
     } else {
       break
     }
   }
 
   return streak
-}
-
-// Mark word as learned
-export function markWordAsLearned(userId: string, wordId: string): void {
-  const key = `learned_words_${userId}`
-  const learned = getLearnedWords(userId)
-  if (!learned.includes(wordId)) {
-    learned.push(wordId)
-    localStorage.setItem(key, JSON.stringify(learned))
-  }
-}
-
-// Get learned words
-export function getLearnedWords(userId: string): string[] {
-  const key = `learned_words_${userId}`
-  const data = localStorage.getItem(key)
-  return data ? JSON.parse(data) : []
 }

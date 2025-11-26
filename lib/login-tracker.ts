@@ -1,50 +1,64 @@
+import { db } from "./firebase"
+import { collection, doc, setDoc, getDocs, getDoc } from "firebase/firestore"
+
 export interface LoginDay {
-  date: string // YYYY-MM-DD format
+  date: string
   timestamp: string
 }
 
 // Track a login for today
-export function trackLogin(userId: string): void {
-  const today = getTodayDateString()
-  const loginDays = getLoginDays(userId)
-
-  // Check if already logged in today
-  const alreadyLoggedToday = loginDays.some((day) => day.date === today)
-
-  if (!alreadyLoggedToday) {
-    loginDays.push({
-      date: today,
-      timestamp: new Date().toISOString(),
-    })
-
-    localStorage.setItem(`login_days_${userId}`, JSON.stringify(loginDays))
+export async function trackLogin(userId: string): Promise<void> {
+  const today = new Date().toISOString().split("T")[0]
+  // Create a document reference for today's date to prevent duplicates
+  const loginRef = doc(db, "users", userId, "logins", today)
+  
+  try {
+    const docSnap = await getDoc(loginRef)
+    
+    // Only write if it doesn't exist yet
+    if (!docSnap.exists()) {
+      await setDoc(loginRef, {
+        date: today,
+        timestamp: new Date().toISOString()
+      })
+    }
+  } catch (error) {
+    console.error("Error tracking login:", error)
   }
 }
 
-// Get all login days for a user
-export function getLoginDays(userId: string): LoginDay[] {
-  const data = localStorage.getItem(`login_days_${userId}`)
-  return data ? JSON.parse(data) : []
+// Get all login days (useful for streak calculation)
+export async function getLoginDays(userId: string): Promise<LoginDay[]> {
+  try {
+    const loginsRef = collection(db, "users", userId, "logins")
+    const snapshot = await getDocs(loginsRef)
+    return snapshot.docs.map(doc => doc.data() as LoginDay)
+  } catch (error) {
+    console.error("Error getting login days:", error)
+    return []
+  }
 }
 
 // Get count of unique login days
-export function getLoginDayCount(userId: string): number {
-  return getLoginDays(userId).length
+export async function getLoginDayCount(userId: string): Promise<number> {
+  try {
+    const loginsRef = collection(db, "users", userId, "logins")
+    const snapshot = await getDocs(loginsRef)
+    return snapshot.size
+  } catch (error) {
+    console.error("Error getting login count:", error)
+    return 0
+  }
 }
 
 // Check if user has logged in for at least 7 days
-export function hasSevenDayAccess(userId: string): boolean {
-  return getLoginDayCount(userId) >= 7
+export async function hasSevenDayAccess(userId: string): Promise<boolean> {
+  const count = await getLoginDayCount(userId)
+  return count >= 7
 }
 
 // Get days remaining until quiz access
-export function getDaysUntilQuizAccess(userId: string): number {
-  const loginDays = getLoginDayCount(userId)
-  return Math.max(0, 7 - loginDays)
-}
-
-// Helper to get today's date as YYYY-MM-DD
-function getTodayDateString(): string {
-  const today = new Date()
-  return today.toISOString().split("T")[0]
+export async function getDaysUntilQuizAccess(userId: string): Promise<number> {
+  const count = await getLoginDayCount(userId)
+  return Math.max(0, 7 - count)
 }

@@ -19,35 +19,52 @@ interface LearnedWord {
 export function LearnedWordsModal({ userId }: { userId: string }) {
   const [learnedWords, setLearnedWords] = useState<LearnedWord[]>([])
   const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    const quizResults = getQuizResults(userId)
-    const wordsMap = new Map<string, LearnedWord>()
+    async function fetchWords() {
+      if (open) {
+        setLoading(true)
+        try {
+          // 1. Fetch results from Firebase
+          const quizResults = await getQuizResults(userId)
+          const wordsMap = new Map<string, LearnedWord>()
 
-    // Track learned words from correct quiz answers
-    quizResults.forEach((result) => {
-      result.answers.forEach((answer) => {
-        if (answer.isCorrect && !wordsMap.has(answer.questionId)) {
-          const wordData = getWordById(answer.questionId)
-          if (wordData) {
-            wordsMap.set(answer.questionId, {
-              wordId: answer.questionId,
-              word: wordData.word,
-              dialectName: wordData.dialectName,
-              translation: answer.correctAnswer,
-              learnedDate: result.completedAt,
+          // 2. Process the results
+          quizResults.forEach((result) => {
+            result.answers.forEach((answer) => {
+              // Only add correct answers we haven't seen yet
+              if (answer.isCorrect && !wordsMap.has(answer.questionId)) {
+                const wordData = getWordById(answer.questionId)
+                if (wordData) {
+                  wordsMap.set(answer.questionId, {
+                    wordId: answer.questionId,
+                    word: wordData.word,
+                    dialectName: "Dialect", // You might want to fetch the dialect name properly here if needed
+                    translation: answer.correctAnswer,
+                    learnedDate: result.completedAt,
+                  })
+                }
+              }
             })
-          }
-        }
-      })
-    })
+          })
 
-    setLearnedWords(
-      Array.from(wordsMap.values()).sort(
-        (a, b) => new Date(b.learnedDate).getTime() - new Date(a.learnedDate).getTime(),
-      ),
-    )
-  }, [userId])
+          // 3. Sort by most recently learned
+          setLearnedWords(
+            Array.from(wordsMap.values()).sort(
+              (a, b) => new Date(b.learnedDate).getTime() - new Date(a.learnedDate).getTime(),
+            ),
+          )
+        } catch (error) {
+          console.error("Failed to fetch learned words", error)
+        } finally {
+          setLoading(false)
+        }
+      }
+    }
+
+    fetchWords()
+  }, [userId, open])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -61,7 +78,12 @@ export function LearnedWordsModal({ userId }: { userId: string }) {
         <DialogHeader>
           <DialogTitle>Your Learned Words</DialogTitle>
         </DialogHeader>
-        {learnedWords.length > 0 ? (
+        
+        {loading ? (
+           <div className="flex justify-center py-8">
+             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+           </div>
+        ) : learnedWords.length > 0 ? (
           <div className="space-y-3">
             {learnedWords.map((item) => (
               <Card key={item.wordId} className="hover:shadow-md transition-shadow">

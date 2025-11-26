@@ -1,3 +1,5 @@
+import { db } from "./firebase"
+import { collection, addDoc, getDocs, query, orderBy } from "firebase/firestore"
 import { wordsDatabase, type Word } from "./dialects-data"
 
 export interface QuizQuestion {
@@ -21,20 +23,18 @@ export interface QuizResult {
   completedAt: string
 }
 
-// Generate a random quiz with questions from all dialects
+// Generate a random quiz (Kept synchronous as it uses static data)
 export function generateQuiz(questionCount = 10): QuizQuestion[] {
   const shuffled = [...wordsDatabase].sort(() => Math.random() - 0.5)
   const selectedWords = shuffled.slice(0, questionCount)
 
   return selectedWords.map((word) => {
-    // Get wrong answers from other words
     const wrongAnswers = wordsDatabase
       .filter((w) => w.id !== word.id && w.translation !== word.translation)
       .sort(() => Math.random() - 0.5)
       .slice(0, 3)
       .map((w) => w.translation)
 
-    // Combine and shuffle options
     const options = [word.translation, ...wrongAnswers].sort(() => Math.random() - 0.5)
 
     return {
@@ -46,30 +46,27 @@ export function generateQuiz(questionCount = 10): QuizQuestion[] {
   })
 }
 
-// Save quiz result to localStorage
-export function saveQuizResult(result: QuizResult): void {
-  const results = getQuizResults(result.userId)
-  results.push(result)
-  localStorage.setItem(`quiz_results_${result.userId}`, JSON.stringify(results))
+// Save result to Firebase
+export async function saveQuizResult(result: QuizResult): Promise<void> {
+  try {
+    const resultsRef = collection(db, "users", result.userId, "quiz_results")
+    await addDoc(resultsRef, result)
+  } catch (e) {
+    console.error("Error saving quiz result: ", e)
+  }
 }
 
-// Get all quiz results for a user
-export function getQuizResults(userId: string): QuizResult[] {
-  const data = localStorage.getItem(`quiz_results_${userId}`)
-  return data ? JSON.parse(data) : []
-}
-
-// Get user's best score
-export function getBestScore(userId: string): number {
-  const results = getQuizResults(userId)
-  if (results.length === 0) return 0
-  return Math.max(...results.map((r) => (r.score / r.totalQuestions) * 100))
-}
-
-// Get user's average score
-export function getAverageScore(userId: string): number {
-  const results = getQuizResults(userId)
-  if (results.length === 0) return 0
-  const total = results.reduce((sum, r) => sum + (r.score / r.totalQuestions) * 100, 0)
-  return Math.round(total / results.length)
+// Fetch results from Firebase
+export async function getQuizResults(userId: string): Promise<QuizResult[]> {
+  try {
+    const resultsRef = collection(db, "users", userId, "quiz_results")
+    // Order by completedAt descending (newest first)
+    const q = query(resultsRef, orderBy("completedAt", "desc"))
+    const snapshot = await getDocs(q)
+    
+    return snapshot.docs.map(doc => doc.data() as QuizResult)
+  } catch (error) {
+    console.error("Error fetching quiz results:", error)
+    return []
+  }
 }
